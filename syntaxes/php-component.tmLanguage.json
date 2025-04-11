@@ -1,0 +1,41 @@
+{
+  "name": "PHP Components",
+  "scopeName": "source.php.component",
+  "fileTypes": ["php"],
+  "patterns": [
+    {
+      "include": "source.php"
+    },
+    {
+      "name": "meta.component.php",
+      "begin": "(<\\?component\\s+)([\\w\\d]+)(>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.section.component.begin.php" },
+        "2": { "name": "entity.name.type.component.php" },
+        "3": { "name": "punctuation.section.component.begin.php" }
+      },
+      "end": "(<\\?/component>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.section.component.end.php" }
+      },
+      "patterns": [
+        { "include": "source.php" },
+        { "include": "text.html.basic" }
+      ]
+    },
+    {
+      "name": "meta.component-props.php",
+      "begin": "(<\\?props\\s+)([\\w\\d]+)(>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.section.props.begin.php" },
+        "2": { "name": "variable.other.property.php" },
+        "3": { "name": "punctuation.section.props.begin.php" }
+      },
+      "end": "(<\\?/props>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.section.props.end.php" }
+      },
+      "patterns": [{ "include": "source.php" }]
+    }
+  ]
+}
