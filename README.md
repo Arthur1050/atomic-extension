@@ -1,16 +1,81 @@
-# atomic-php README
+# Atomic PHP Component Framework
 
-This is the README for your extension "atomic-php". After writing up a brief description, we recommend including the following sections.
+Esta extensão fornece suporte para desenvolvimento de componentes PHP com syntax highlighting e intellisense.
 
-## Features
+## Uso do Template HTML em Componentes
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+Para usar blocos HTML em seus componentes, use os delimitadores `<<` e `>>`:
 
-For example if there is an image subfolder under your extension project workspace:
+```php
+function render(): string {
+    return <<
+        <button class="btn btn-primary">{$this->label}</button>
+    >>;
+}
+```
 
-\!\[feature X\]\(images/feature-x.png\)
+### Expressões PHP dentro do template
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+Você pode incluir variáveis PHP diretamente usando a sintaxe `{$variable}`:
+
+```php
+<<
+    <div class="container">{$this->content}</div>
+>>
+```
+
+Para expressões mais complexas, use a sintaxe de chaves duplas:
+
+```php
+<<
+    <div class="container">{{ $this->getContent() }}</div>
+>>
+```
+
+### Componentes aninhados
+
+Você pode usar outros componentes dentro do seu template HTML:
+
+```php
+<<
+    <div class="card">
+        <Button label="Clique aqui" type="{{ Button::TYPE_PRIMARY }}" />
+    </div>
+>>
+```
+
+## Escaneando componentes
+
+Para que a extensão forneça intellisense para seus componentes, execute o comando:
+
+```
+PHP Component: Scan Components in Workspace
+```
+
+Este comando pode ser executado através da paleta de comandos (Ctrl+Shift+P).
+
+## Estrutura de um componente
+
+Um componente básico deve seguir esta estrutura:
+
+```php
+class NomeDoComponente extends Component {
+    public function __construct(
+        // Propriedades do componente aqui
+        private string $prop1,
+        private int $prop2 = 1
+    ) {}
+
+    function render(): string {
+        return <<
+            <!-- Seu HTML aqui -->
+            <div>{$this->prop1}</div>
+        >>;
+    }
+}
+```
+
+A extensão escaneará automaticamente seu workspace em busca de classes que estendem `Component` e fornecerá autocompleção para elas.
 
 ## Requirements
 

@@ -9,3 +9,11 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Manteremos apenas os arquivos de exemplo, excluindo o restante
+examples/**
+
+# Não excluir arquivos essenciais para a extensão
+!language-configuration.json
+!php-validation.js
+!out/**

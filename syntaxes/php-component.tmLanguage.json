@@ -1,41 +1,63 @@
 {
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "PHP Components",
   "scopeName": "source.php.component",
-  "fileTypes": ["php"],
+  "fileTypes": ["phpx"],
   "patterns": [
-    {
-      "include": "source.php"
-    },
-    {
-      "name": "meta.component.php",
-      "begin": "(<\\?component\\s+)([\\w\\d]+)(>)",
+    { "include": "source.php" },
+    { "include": "#template-block" }
+  ],
+  "repository": {
+    "template-block": {
+      "begin": "(<<)",
       "beginCaptures": {
-        "1": { "name": "punctuation.section.component.begin.php" },
-        "2": { "name": "entity.name.type.component.php" },
-        "3": { "name": "punctuation.section.component.begin.php" }
+        "1": { "name": "punctuation.section.embedded.begin.html.phpx" }
       },
-      "end": "(<\\?/component>)",
+      "end": "(>>)",
       "endCaptures": {
-        "1": { "name": "punctuation.section.component.end.php" }
+        "1": { "name": "punctuation.section.embedded.end.html.phpx" }
       },
       "patterns": [
-        { "include": "source.php" },
+        { "include": "#php-interpolation" },
+        { "include": "#component-tag" },
         { "include": "text.html.basic" }
-      ]
+      ],
+      "contentName": "text.html.basic"
     },
-    {
-      "name": "meta.component-props.php",
-      "begin": "(<\\?props\\s+)([\\w\\d]+)(>)",
+    "php-interpolation": {
+      "begin": "\\{\\{",
       "beginCaptures": {
-        "1": { "name": "punctuation.section.props.begin.php" },
-        "2": { "name": "variable.other.property.php" },
-        "3": { "name": "punctuation.section.props.begin.php" }
+        "0": { "name": "punctuation.section.embedded.begin.php" }
       },
-      "end": "(<\\?/props>)",
+      "end": "\\}\\}",
       "endCaptures": {
-        "1": { "name": "punctuation.section.props.end.php" }
+        "0": { "name": "punctuation.section.embedded.end.php" }
       },
-      "patterns": [{ "include": "source.php" }]
+      "patterns": [
+        { "include": "source.php" }
+      ],
+      "contentName": "source.php"
+    },
+    "component-tag": {
+      "begin": "(<)([A-Z][a-zA-Z0-9]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.html" },
+        "2": { "name": "entity.name.tag.html" }
+      },
+      "end": "(/?>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.end.html" }
+      },
+      "patterns": [
+        {
+          "match": "\\s([a-zA-Z][a-zA-Z0-9]*)(?=\\s|=|/?>|$)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.html" }
+          }
+        },
+        { "include": "#php-interpolation" },
+        { "include": "text.html.basic#attribute" }
+      ]
     }
-  ]
+  }
 }

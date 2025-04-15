@@ -1,7 +1,7 @@
 {
   "name": "atomic-php",
   "displayName": "Atomic-PHP",
-  "description": "",
+  "description": "Suporte para framework de componentes PHP com syntax highlighting e intellisense",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.99.0"
@@ -12,32 +12,14 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:php",
-    "workspaceContains:php-component.config.json"
+    "onLanguage:phpx"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "grammars": [
-      {
-        "language": "php",
-        "scopeName": "source.php.component",
-        "path": "./syntaxes/php.component.tmLanguage.json",
-        "embeddedLanguages": {
-          "php": "source.php",
-          "meta.embedded.block.html": "html",
-          "meta.embedded.block.js": "javascript",
-          "meta.embedded.block.css": "css"
-        }
-      }
-    ],
     "commands": [
       {
-        "command": "atomic-php.helloWorld",
-        "title": "Hello World"
-      },
-      {
-        "command": "php-component.toggleComponentMode",
-        "title": "PHP Component: Toggle Component Mode"
+        "command": "php-component.scanComponents",
+        "title": "PHP Component: Scan Components in Workspace"
       }
     ],
     "configuration": {
@@ -48,13 +30,52 @@
           "default": true,
           "description": "Habilitar/desabilitar suporte ao framework de componentes PHP"
         },
-        "phpComponent.componentTag": {
-          "type": "string",
-          "default": "component",
-          "description": "Nome da tag de componente PHP"
+        "phpComponent.customSyntax": {
+          "type": "object",
+          "default": {
+            "enableTemplateDelimiters": true
+          },
+          "description": "Configurações para sintaxe personalizada do framework de componentes"
         }
       }
-    }
+    },
+    "grammars": [
+      {
+        "language": "phpx",
+        "scopeName": "source.php.component",
+        "path": "./syntaxes/php-component.tmLanguage.json",
+        "embeddedLanguages": {
+          "text.html.basic": "html",
+          "source.php": "php"
+        }
+      }
+    ],
+    "problemPatterns": [
+      {
+        "name": "phpComponentError",
+        "regexp": "^([^:]+):(\\d+):(\\d+):\\s+(.*)$",
+        "file": 1,
+        "line": 2,
+        "column": 3,
+        "message": 4
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "php-component",
+        "owner": "php-component",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": "$phpComponentError"
+      }
+    ],
+    "languages": [
+      {
+        "id": "phpx",
+        "aliases": ["PHP Components", "phpx"],
+        "extensions": [".phpx"],
+        "configuration": "./language-configuration-phpx.json"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "pnpm run compile",

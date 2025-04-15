@@ -1,0 +1,28 @@
+<?php
+
+/**
+ * Componente de botão reutilizável
+ */
+class Button extends Component {
+    function __construct(
+        string $text,
+        string $type = 'primary',
+        string $size = 'md',
+        bool $disabled = false
+    ) {
+        // Construtor do componente
+    }
+
+    function render() {
+        return <<
+            <button 
+                class="btn btn-{{$type}} btn-{{$size}} {{$disabled ? 'disabled' : ''}}"
+                {{$disabled ? 'disabled' : ''}}
+            >
+                <div class="btn-content">
+                    {{$text}}
+                </div>
+            </button>
+        >>;
+    }
+}

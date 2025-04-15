@@ -2,178 +2,338 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
-let phpComponentServerDisposable: vscode.Disposable | undefined;
+interface ComponentDefinition {
+    name: string;
+    properties: {
+        name: string;
+        type: string;
+        description?: string;
+        required?: boolean;
+    }[];
+    description?: string;
+    filePath?: string;
+}
+
+const components: Map<string, ComponentDefinition> = new Map();
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('PHP Component Framework extension is now active');
 
-    // Registra o comando para ativar/desativar manualmente o modo component
-    const toggleCommand = vscode.commands.registerCommand('php-component.toggleComponentMode', () => {
-        vscode.window.showInformationMessage('PHP Component mode toggled');
-        // Lógica para ativar/desativar
+    // Registrar comando para escanear componentes
+    const scanCommand = vscode.commands.registerCommand('php-component.scanComponents', () => {
+        scanComponentsInWorkspace();
     });
-
-    context.subscriptions.push(toggleCommand);
-
-    // Detecta quando um workspace é aberto e verifica o arquivo de configuração
-    vscode.workspace.onDidChangeWorkspaceFolders(detectConfigurationFile);
     
-    // Também verifica ao iniciar
+    context.subscriptions.push(scanCommand);
+
+    // Iniciar escaneamento de componentes ao carregar
     if (vscode.workspace.workspaceFolders) {
-        detectConfigurationFile();
+        scanComponentsInWorkspace();
     }
 
-    // Registra o decorationType para destacar a sintaxe especial
-    const componentDecorationType = vscode.window.createTextEditorDecorationType({
-        backgroundColor: 'rgba(100, 100, 255, 0.1)',
-        border: '1px solid rgba(100, 100, 255, 0.3)'
+    // Detectar alterações em arquivos PHPX para atualizar componentes
+    const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.phpx');
+    
+    fileWatcher.onDidChange(uri => {
+        const filePath = uri.fsPath;
+        scanComponentFile(filePath);
+    });
+    
+    fileWatcher.onDidCreate(uri => {
+        const filePath = uri.fsPath;
+        scanComponentFile(filePath);
+    });
+    
+    fileWatcher.onDidDelete(uri => {
+        const filePath = uri.fsPath;
+        // Remove components from this file
+        components.forEach((component, name) => {
+            if (component.filePath === filePath) {
+                components.delete(name);
+            }
+        });
     });
 
-    // Observa alterações no editor
-    vscode.window.onDidChangeActiveTextEditor(editor => {
-        if (editor && isPhpFile(editor.document)) {
-            updateDecorations(editor, componentDecorationType);
+    context.subscriptions.push(fileWatcher);
+
+    // Registrar provedor de completions para componentes
+    const completionProvider = vscode.languages.registerCompletionItemProvider(
+        { scheme: 'file', language: 'phpx' },
+        {
+            provideCompletionItems(document, position) {
+                // Verificar se estamos dentro de um bloco HTML (entre << e >>)
+                const isInHtml = isInsideHtmlBlock(document, position);
+                const textLine = document.lineAt(position).text;
+                const textBefore = textLine.substring(0, position.character);
+                
+                // Verificar se estamos começando uma tag dentro de um bloco HTML
+                if (isInHtml && textBefore.match(/<[A-Z][a-zA-Z0-9]*$/)) {
+                    const completionItems: vscode.CompletionItem[] = [];
+                    
+                    // Adicionar todos os componentes detectados
+                    components.forEach((component, name) => {
+                        const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Class);
+                        item.detail = `Component Class: ${name}`;
+                        item.documentation = component.description || `Component that extends Component class`;
+                        
+                        // Inserir com atributos como snippet
+                        let snippetText = name;
+                        if (component.properties.length > 0) {
+                            snippetText += ' ';
+                            component.properties.forEach((prop, index) => {
+                                snippetText += `${prop.name}={{$\{${index + 1}:${prop.type}}}${component.properties.length - 1 > index ? ' ' : ''}`;
+                            });
+                        }
+                        snippetText += '>';
+                        
+                        item.insertText = new vscode.SnippetString(snippetText);
+                        completionItems.push(item);
+                    });
+                    
+                    return completionItems;
+                }
+                
+                // Verificar se estamos tentando completar um atributo de componente
+                if (isInHtml && isInsideComponentTag(document, position)) {
+                    const componentName = getComponentNameAtPosition(document, position);
+                    if (componentName && components.has(componentName)) {
+                        const component = components.get(componentName)!;
+                        const completionItems: vscode.CompletionItem[] = [];
+                        
+                        component.properties.forEach(prop => {
+                            const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Property);
+                            item.detail = `${prop.name}: ${prop.type}`;
+                            item.documentation = prop.description || `Property of ${componentName}`;
+                            item.insertText = new vscode.SnippetString(`${prop.name}={{$\{1:${prop.type}}}}`);
+                            completionItems.push(item);
+                        });
+                        
+                        return completionItems;
+                    }
+                }
+                
+                // Se estamos dentro de HTML e tentando escrever HTML normal
+                if (isInHtml) {
+                    // Delegamos para o provedor de HTML nativo que será registrado pela linguagem embarcada
+                    return null;
+                }
+                
+                return null;
+            }
+        },
+        '<', // Trigger character for tag completion
+        ' '  // Trigger for attribute completion
+    );
+    
+    // Registrar provedor de hover para componentes
+    const hoverProvider = vscode.languages.registerHoverProvider(
+        { scheme: 'file', language: 'phpx' },
+        {
+            provideHover(document, position) {
+                // Verificar se estamos dentro de um bloco HTML
+                if (!isInsideHtmlBlock(document, position)) {
+                    return null;
+                }
+                
+                // Verificar se estamos sobre um componente
+                const wordRange = document.getWordRangeAtPosition(position);
+                if (!wordRange) {
+                    return null;
+                }
+                
+                const word = document.getText(wordRange);
+                
+                // Verificar se é um componente conhecido
+                if (components.has(word)) {
+                    const component = components.get(word)!;
+                    let hoverContent = new vscode.MarkdownString();
+                    
+                    hoverContent.appendMarkdown(`# Component: ${component.name}\n\n`);
+                    if (component.description) {
+                        hoverContent.appendMarkdown(`${component.description}\n\n`);
+                    }
+                    
+                    if (component.properties.length > 0) {
+                        hoverContent.appendMarkdown(`## Properties\n\n`);
+                        component.properties.forEach(prop => {
+                            hoverContent.appendMarkdown(`- **${prop.name}**: ${prop.type}${prop.required ? ' (required)' : ''}\n`);
+                            if (prop.description) {
+                                hoverContent.appendMarkdown(`  ${prop.description}\n`);
+                            }
+                        });
+                    }
+                    
+                    return new vscode.Hover(hoverContent);
+                }
+                
+                return null;
+            }
         }
-    });
+    );
+    
+    context.subscriptions.push(completionProvider, hoverProvider);
 
-    vscode.workspace.onDidChangeTextDocument(event => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor && event.document === editor.document && isPhpFile(event.document)) {
-            updateDecorations(editor, componentDecorationType);
-        }
-    });
-
-    // Aplicar decorações ao iniciar
-    if (vscode.window.activeTextEditor && isPhpFile(vscode.window.activeTextEditor.document)) {
-        updateDecorations(vscode.window.activeTextEditor, componentDecorationType);
-    }
+    // Registrar embedded language support
+    // Tratar conteúdo dentro de << >> como HTML
+    registerEmbeddedLanguages(context);
 }
 
-function isPhpFile(document: vscode.TextDocument): boolean {
-    return document.languageId === 'php';
+// Registrar suporte a linguagens embarcadas
+function registerEmbeddedLanguages(context: vscode.ExtensionContext) {
+    // Interceptar o tokenizador para tratar conteúdo entre << >> como HTML
+    // Esta implementação usa as definições de gramática TextMate no package.json
+    // que já estão configuradas para mapear o conteúdo HTML para "text.html.basic"
+    
+    // Para reforçar a detecção de linguagem embutida em blocos HTML
+    const documentSemanticTokensProvider = vscode.languages.registerDocumentSemanticTokensProvider(
+        { scheme: 'file', language: 'phpx' },
+        {
+            provideDocumentSemanticTokens(document) {
+                // Apenas para informar o VS Code que há semântica de linguagem embutida
+                // A implementação real está na gramática TextMate
+                return new vscode.SemanticTokens(new Uint32Array(0));
+            }
+        },
+        new vscode.SemanticTokensLegend([], [])
+    );
+    
+    context.subscriptions.push(documentSemanticTokensProvider);
 }
 
-function detectConfigurationFile() {
+function scanComponentsInWorkspace() {
     if (!vscode.workspace.workspaceFolders) {
         return;
     }
+    
+    components.clear();
+    
+    // Scan only .phpx files for components
+    vscode.workspace.findFiles('**/*.phpx').then(uris => {
+        uris.forEach(uri => {
+            scanComponentFile(uri.fsPath);
+        });
+    });
+}
 
-    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    const configPath = path.join(workspaceRoot, 'php-component.config.json'); // Nome do seu arquivo de configuração
-
-    fs.access(configPath, fs.constants.F_OK, (err) => {
-        if (!err) {
-            // O arquivo de configuração existe
-            fs.readFile(configPath, 'utf8', (err, data) => {
-                if (err) {
-                    vscode.window.showErrorMessage('Erro ao ler o arquivo de configuração do PHP Component Framework');
-                    return;
+function scanComponentFile(filePath: string) {
+    fs.readFile(filePath, 'utf8', (err, content) => {
+        if (err) {
+            console.error(`Erro ao ler arquivo: ${filePath}`, err);
+            return;
+        }
+        
+        // Procurar classes que extendem Component
+        const classRegex = /class\s+([A-Z][a-zA-Z0-9]*)\s+extends\s+Component/g;
+        let match;
+        
+        while ((match = classRegex.exec(content)) !== null) {
+            const componentName = match[1];
+            
+            // Procurar construtor para extrair propriedades
+            const constructorMatch = content.match(new RegExp(`function\\s+__construct\\s*\\(([^)]*)\\)\\s*{`, 'g'));
+            const properties: ComponentDefinition['properties'] = [];
+            
+            if (constructorMatch && constructorMatch.length > 0) {
+                const params = constructorMatch[0].match(/\(([^)]*)\)/);
+                if (params && params[1]) {
+                    const paramList = params[1].split(',').map(p => p.trim()).filter(p => p);
+                    
+                    paramList.forEach(param => {
+                        const paramParts = param.split(/\s+/);
+                        let type = 'mixed';
+                        let name = paramParts[0];
+                        
+                        if (paramParts.length > 1) {
+                            // Suporte a type hints do PHP
+                            if (paramParts[0].startsWith('?') || ['string', 'int', 'float', 'bool', 'array', 'object'].includes(paramParts[0])) {
+                                type = paramParts[0].startsWith('?') ? paramParts[0].substring(1) + '|null' : paramParts[0];
+                                name = paramParts[1];
+                            }
+                        }
+                        
+                        // Remover $ do nome da variável se existir
+                        if (name.startsWith('$')) {
+                            name = name.substring(1);
+                        }
+                        
+                        properties.push({
+                            name,
+                            type,
+                            required: !param.includes('=') // Se não tem valor padrão, é obrigatório
+                        });
+                    });
                 }
-
-                try {
-                    const config = JSON.parse(data);
-                    activatePhpComponentServer(config);
-                    vscode.window.showInformationMessage('PHP Component Framework detectado e ativado');
-                } catch (e) {
-                    vscode.window.showErrorMessage('Arquivo de configuração do PHP Component Framework inválido');
-                }
+            }
+            
+            // Extrair comentários de documentação para descrição
+            let description = '';
+            const docCommentRegex = /\/\*\*([\s\S]*?)\*\/\s*class\s+([A-Z][a-zA-Z0-9]*)\s+extends\s+Component/;
+            const docMatch = content.match(docCommentRegex);
+            
+            if (docMatch && docMatch[1] && docMatch[2] === componentName) {
+                description = docMatch[1]
+                    .replace(/^\s*\*\s?/gm, '') // Remove asteriscos e espaços
+                    .trim();
+            }
+            
+            // Registrar componente
+            components.set(componentName, {
+                name: componentName,
+                properties,
+                description,
+                filePath
             });
-        } else {
-            // O arquivo não existe, desativar se estiver ativo
-            deactivatePhpComponentServer();
         }
     });
 }
 
-function activatePhpComponentServer(config: any) {
-    // Se já estiver ativo, desative primeiro
-    deactivatePhpComponentServer();
-
-    // Aqui você implementaria a lógica para iniciar seu language server
-    // Este é um exemplo simplificado
-    
-    // Registrar provedores de linguagem específicos para seu componente PHP
-    const documentSelector = [
-        { scheme: 'file', language: 'php' }
-    ];
-
-    // Provedor de completions customizadas
-    const completionProvider = vscode.languages.registerCompletionItemProvider(documentSelector, {
-        provideCompletionItems(document, position) {
-            // Lógica para fornecer sugestões de código baseadas no seu framework
-            const completionItems: vscode.CompletionItem[] = [];
-            
-            // Exemplo de sugestão para um componente personalizado
-            const componentCompletion = new vscode.CompletionItem('component', vscode.CompletionItemKind.Snippet);
-            componentCompletion.insertText = new vscode.SnippetString('<?component ${1:name}>\n\t${2}\n<?/component>');
-            componentCompletion.documentation = new vscode.MarkdownString('Cria um novo componente PHP');
-            
-            completionItems.push(componentCompletion);
-            
-            return completionItems;
-        }
-    });
-
-    // Provedor de hover para mostrar informações sobre componentes
-    const hoverProvider = vscode.languages.registerHoverProvider(documentSelector, {
-        provideHover(document, position) {
-            const wordRange = document.getWordRangeAtPosition(position);
-            if (!wordRange) {
-                return null;
-            }
-            
-            const word = document.getText(wordRange);
-            
-            // Verifica se é uma sintaxe específica do seu framework
-            const line = document.lineAt(position.line).text;
-            if (line.includes('<?component') && word === 'component') {
-                return new vscode.Hover('Define um componente PHP reutilizável');
-            }
-            
-            return null;
-        }
-    });
-    
-    phpComponentServerDisposable = vscode.Disposable.from(
-        completionProvider,
-        hoverProvider
-    );
-}
-
-function deactivatePhpComponentServer() {
-    if (phpComponentServerDisposable) {
-        phpComponentServerDisposable.dispose();
-        phpComponentServerDisposable = undefined;
-    }
-}
-
-// Função para destacar sintaxe especial
-function updateDecorations(editor: vscode.TextEditor, decorationType: vscode.TextEditorDecorationType) {
-    const document = editor.document;
+function isInsideHtmlBlock(document: vscode.TextDocument, position: vscode.Position): boolean {
+    // Procurar o bloco HTML atual
     const text = document.getText();
+    const offset = document.offsetAt(position);
     
-    const componentMatches: vscode.DecorationOptions[] = [];
+    // Encontrar as posições dos delimitadores << >> mais próximos
+    let lastOpenBlock = text.lastIndexOf('<<', offset);
+    let nextCloseBlock = text.indexOf('>>', offset);
     
-    // Regex para encontrar suas expressões de componente personalizadas
-    // Ajuste conforme a sintaxe do seu framework
-    const componentRegex = /(<\?component\s+[\w\s\d="']+\?>)|(<\?component\s+[\w\d]+>[\s\S]*?<\?\/component>)/g;
+    // Encontrar o início do close block anterior ao offset
+    let lastCloseBlock = -1;
+    let searchPos = 0;
     
-    let match;
-    while ((match = componentRegex.exec(text))) {
-        const startPos = document.positionAt(match.index);
-        const endPos = document.positionAt(match.index + match[0].length);
-        
-        const decoration = { 
-            range: new vscode.Range(startPos, endPos),
-            hoverMessage: 'Componente PHP'
-        };
-        
-        componentMatches.push(decoration);
+    while (true) {
+        const closePos = text.indexOf('>>', searchPos);
+        if (closePos === -1 || closePos >= offset) {
+            break;
+        }
+        lastCloseBlock = closePos;
+        searchPos = closePos + 2;
     }
     
-    editor.setDecorations(decorationType, componentMatches);
+    return lastOpenBlock !== -1 && 
+           lastOpenBlock > lastCloseBlock && 
+           (nextCloseBlock === -1 || nextCloseBlock > offset);
+}
+
+function isInsideComponentTag(document: vscode.TextDocument, position: vscode.Position): boolean {
+    // Verificar se estamos dentro de uma tag de componente
+    const text = document.getText();
+    const offset = document.offsetAt(position);
+    
+    // Encontrar a última abertura de tag (não fechada) antes da posição
+    const lineText = document.lineAt(position).text.substring(0, position.character);
+    const match = lineText.match(/<([A-Z][a-zA-Z0-9]*)(?:\s+[^>]*)?$/);
+    
+    return !!match;
+}
+
+function getComponentNameAtPosition(document: vscode.TextDocument, position: vscode.Position): string | null {
+    // Encontrar o nome do componente da tag atual
+    const lineText = document.lineAt(position).text.substring(0, position.character);
+    const match = lineText.match(/<([A-Z][a-zA-Z0-9]*)(?:\s+[^>]*)?$/);
+    
+    return match ? match[1] : null;
 }
 
 export function deactivate() {
-    deactivatePhpComponentServer();
+    // Limpar recursos quando a extensão for desativada
 }
